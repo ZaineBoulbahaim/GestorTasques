@@ -1,0 +1,28 @@
+# ========================================
+# CONFIGURACIÓN DEL SERVIDOR
+# ========================================
+PORT=3000
+NODE_ENV=development
+
+# ========================================
+# CONFIGURACIÓN DE MONGODB
+# ========================================
+MONGO_URI=mongodb://localhost:27017/task_manager
+
+# ========================================
+# CONFIGURACIÓN DE JWT (AUTENTICACIÓN)
+# ========================================
+# Clave secreta para firmar tokens (CAMBIAR EN PRODUCCIÓN)
+# Generar una clave segura: openssl rand -base64 32
+JWT_SECRET=tu_clave_secreta_super_segura_123456789
+
+# Tiempo de expiración del token
+# Ejemplos: 1h, 7d, 30d, 1y
+JWT_EXPIRES_IN=7d
+
+# ========================================
+# CONFIGURACIÓN DE CLOUDINARY
+# ========================================
+CLOUDINARY_CLOUD_NAME=tu_cloud_name
+CLOUDINARY_API_KEY=tu_api_key
+CLOUDINARY_API_SECRET=tu_api_secret
