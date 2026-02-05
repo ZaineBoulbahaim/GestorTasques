@@ -6,62 +6,39 @@ import {
   getTaskById,
   updateTask,
   deleteTask,
-  getTaskStats, // Nueva función de estadísticas
+  getTaskStats,
 } from "../controllers/taskController.js";
 
-// IMPORTAR MIDDLEWARE DE AUTENTICACIÓN
 import auth from "../middleware/auth.js";
+import checkPermission from "../middleware/checkPermission.js";
 
 const router = express.Router();
 
-/** PROTEGER TODAS LAS RUTAS */
-router.use(auth); // Aplica auth a todas las rutas siguientes
+// PROTECCIÓ GLOBAL DE RUTES
+// Totes les rutes de tasques requereixen que l'usuari estigui autenticat
+router.use(auth);
 
-/** RUTAS DE TAREAS (Todas protegidas)*/
+/* ------------------------------------------------------------
+   RUTES DE TASQUES (Control d'accés granular)
+------------------------------------------------------------ */
 
-/**
- * @route   GET /api/tasks/stats
- * @desc    Obtener estadísticas de tareas del usuario
- * @access  Private
- * @note    Esta ruta debe ir ANTES de "/:id" para evitar conflictos
- */
-router.get("/stats", getTaskStats);
+// Estadístiques de les tasques de l'usuari
+// Es col·loca abans de /:id per evitar que "stats" es confongui amb un ID
+router.get("/stats", checkPermission("tasks:read"), getTaskStats);
 
-/**
- * @route   POST /api/tasks
- * @desc    Crear nueva tarea
- * @access  Private
- * Body: { title, description, cost, hours_estimated, image }
- */
-router.post("/", createTask);
+// Crear una nova tasca
+router.post("/", checkPermission("tasks:create"), createTask);
 
-/**
- * @route   GET /api/tasks
- * @desc    Obtener todas las tareas del usuario autenticado
- * @access  Private
- */
-router.get("/", getAllTasks);
+// Llistar totes les tasques de l'usuari
+router.get("/", checkPermission("tasks:read"), getAllTasks);
 
-/**
- * @route   GET /api/tasks/:id
- * @desc    Obtener tarea por ID (solo si pertenece al usuario)
- * @access  Private
- */
-router.get("/:id", getTaskById);
+// Obtenir una tasca específica per ID
+router.get("/:id", checkPermission("tasks:read"), getTaskById);
 
-/**
- * @route   PUT /api/tasks/:id
- * @desc    Actualizar tarea por ID (solo si pertenece al usuario)
- * @access  Private
- * Body: { title, description, cost, hours_estimated, completed }
- */
-router.put("/:id", updateTask);
+// Actualitzar una tasca existent
+router.put("/:id", checkPermission("tasks:update"), updateTask);
 
-/**
- * @route   DELETE /api/tasks/:id
- * @desc    Eliminar tarea por ID (solo si pertenece al usuario)
- * @access  Private
- */
-router.delete("/:id", deleteTask);
+// Eliminar una tasca
+router.delete("/:id", checkPermission("tasks:delete"), deleteTask);
 
 export default router;

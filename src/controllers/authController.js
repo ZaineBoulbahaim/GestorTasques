@@ -1,54 +1,77 @@
 import User from "../models/User.js";
+import Role from "../models/Role.js";
 import generateToken from "../utils/generateToken.js";
 
 /**
- * REGISTRAR NUEVO USUARIO
- * POST /api/auth/register
- * Body: { name, email, password }
+ * REGISTRAR NOU USUARI
+ * Gestió completa del registre: validació, assignació de rols base i generació de token.
  */
 export const register = (req, res) => {
   const { name, email, password } = req.body;
+  let userRole;
 
-  // Verificar si el email ya existe
-  User.findOne({ email })
+  // 1. Busquem el rol 'user' a la base de dades per assegurar que el nou usuari tingui permisos base.
+  Role.findOne({ name: "user" })
+    .then((role) => {
+      if (!role) {
+        return res.status(500).json({
+          success: false,
+          message: "Error del sistema: rol 'user' no trobat",
+        });
+      }
+      userRole = role;
+      // 2. Verifiquem si l'email ja està registrat abans de procedir.
+      return User.findOne({ email });
+    })
     .then((existingUser) => {
       if (existingUser) {
         return res.status(400).json({
           success: false,
-          message: "Este email ya está registrado",
+          message: "Aquest email ja està registrat",
         });
       }
 
-      // Crear nuevo usuario
+      // 3. Instanciem el nou usuari amb el sistema de rol clàssic i el nou sistema multi-rol.
       const newUser = new User({
         name,
         email,
-        password, // Se cifrará automáticamente con el pre-save hook
-        role: "user",
+        password,
+        role: "user", 
+        roles: [userRole._id], 
       });
 
-      // Guardar en la base de datos
       return newUser.save();
     })
     .then((savedUser) => {
-      // Si savedUser es undefined, significa que ya se envió respuesta (email duplicado)
       if (!savedUser) return;
 
-      // Generar token JWT
-      const token = generateToken(savedUser);
+      // 4. Per retornar una resposta completa, necessitem fer el 'populate' dels rols
+      // i, de forma niuada, dels permisos de cada rol (jerarquia completa).
+      return User.findById(savedUser._id).populate({
+        path: "roles",
+        populate: { path: "permissions" },
+      });
+    })
+    .then((populatedUser) => {
+      if (!populatedUser) return;
 
-      // Responder con token y datos del usuario
+      // 5. Calculem els permisos efectius i generem el token JWT incloent la nova càrrega de dades.
+      const permissions = populatedUser.getEffectivePermissions();
+      const token = generateToken(populatedUser);
+
       res.status(201).json({
         success: true,
         message: "Usuari registrat correctament",
         data: {
           token,
           user: {
-            id: savedUser._id,
-            name: savedUser.name,
-            email: savedUser.email,
-            role: savedUser.role,
-            createdAt: savedUser.createdAt,
+            id: populatedUser._id,
+            name: populatedUser.name,
+            email: populatedUser.email,
+            role: populatedUser.role,
+            roles: populatedUser.roles.map((r) => ({ id: r._id, name: r.name })),
+            permissions,
+            createdAt: populatedUser.createdAt,
           },
         },
       });
@@ -56,206 +79,150 @@ export const register = (req, res) => {
     .catch((error) => {
       res.status(500).json({
         success: false,
-        message: "Error al registrar usuario",
+        message: "Error al registrar usuari",
         error: error.message,
       });
     });
 };
 
 /**
- * INICIAR SESIÓN
- * POST /api/auth/login
- * Body: { email, password }
+ * INICIAR SESSIÓ
+ * Autenticació d'usuaris i càrrega dinàmica de la matriu de permisos.
  */
 export const login = (req, res) => {
   const { email, password } = req.body;
+  let authenticatedUser;
 
-  // Buscar usuario por email (incluir password con +password)
+  // 1. Cercat de l'usuari i inclusió explícita del camp 'password' (marcat com select: false al model).
   User.findOne({ email })
     .select("+password")
     .then((user) => {
       if (!user) {
-        // Usuario no encontrado
-        return res.status(401).json({
-          success: false,
-          message: "Credencials incorrectes",
-        });
+        return res.status(401).json({ success: false, message: "Credencials incorrectes" });
+      }
+      authenticatedUser = user;
+      // 2. Validació de la contrasenya mitjançant el mètode de comparació del model.
+      return user.comparePassword(password);
+    })
+    .then((isMatch) => {
+      if (isMatch === undefined) return;
+      if (!isMatch) {
+        return res.status(401).json({ success: false, message: "Credencials incorrectes" });
       }
 
-      // Comparar contraseña
-      return user.comparePassword(password).then((isMatch) => {
-        if (!isMatch) {
-          // Contraseña incorrecta
-          return res.status(401).json({
-            success: false,
-            message: "Credencials incorrectes",
-          });
-        }
+      // 3. Un cop autenticat, carreguem la informació de rols i permisos per a la sessió actual.
+      // Això permet que el token contingui les capacitats reals del moment.
+      return User.findById(authenticatedUser._id).populate({
+        path: "roles",
+        populate: { path: "permissions" },
+      });
+    })
+    .then((populatedUser) => {
+      if (!populatedUser) return;
 
-        // Credenciales correctas - Generar token
-        const token = generateToken(user);
+      const permissions = populatedUser.getEffectivePermissions();
+      const token = generateToken(populatedUser);
 
-        // Enviar respuesta
-        return res.json({
-          success: true,
-          message: "Sessió iniciada correctament",
-          data: {
-            token,
-            user: {
-              id: user._id,
-              name: user.name,
-              email: user.email,
-              role: user.role,
-            },
+      res.json({
+        success: true,
+        message: "Sessió iniciada correctament",
+        data: {
+          token,
+          user: {
+            id: populatedUser._id,
+            name: populatedUser.name,
+            email: populatedUser.email,
+            role: populatedUser.role,
+            roles: populatedUser.roles.map((r) => ({ id: r._id, name: r.name })),
+            permissions,
           },
-        });
+        },
       });
     })
     .catch((error) => {
       res.status(500).json({
         success: false,
-        message: "Error al iniciar sesión",
+        message: "Error al iniciar sessió",
         error: error.message,
       });
     });
 };
 
 /**
- * OBTENER PERFIL DEL USUARIO ACTUAL
- * GET /api/auth/me
- * Requiere autenticación (middleware auth)
- */
-export const getMe = (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      id: req.user._id,
-      name: req.user.name,
-      email: req.user.email,
-      role: req.user.role,
-      createdAt: req.user.createdAt,
-    },
-  });
-};
-
-/**
- * ACTUALIZAR PERFIL
- * PUT /api/auth/profile
- * Body: { name, email }
+ * ACTUALITZAR PERFIL
+ * Modifica les dades personals de l'usuari amb control de duplicats per a l'email.
  */
 export const updateProfile = (req, res) => {
   const { name, email } = req.body;
 
-  // Si se quiere cambiar el email, verificar que no esté en uso
+  // Cas A: L'usuari vol canviar el seu correu electrònic.
   if (email && email !== req.user.email) {
     User.findOne({ email })
       .then((existingUser) => {
         if (existingUser) {
-          return res.status(400).json({
-            success: false,
-            message: "Este email ya está en uso",
-          });
+          return res.status(400).json({ success: false, message: "Aquest email ja està en ús" });
         }
-
-        // Actualizar usuario
-        return User.findByIdAndUpdate(
-          req.user._id,
-          { name, email },
-          { new: true }
-        );
+        // Apliquem el canvi només si l'email és lliure.
+        return User.findByIdAndUpdate(req.user._id, { name, email }, { new: true });
       })
       .then((updatedUser) => {
         if (!updatedUser) return;
-
         res.json({
           success: true,
           message: "Perfil actualitzat correctament",
-          data: {
-            id: updatedUser._id,
-            name: updatedUser.name,
-            email: updatedUser.email,
-            role: updatedUser.role,
-          },
+          data: { id: updatedUser._id, name: updatedUser.name, email: updatedUser.email, role: updatedUser.role },
         });
       })
       .catch((error) => {
-        res.status(500).json({
-          success: false,
-          message: "Error al actualizar perfil",
-          error: error.message,
-        });
+        res.status(500).json({ success: false, message: "Error al actualitzar perfil", error: error.message });
       });
   } else {
-    // Solo actualizar nombre
+    // Cas B: Només s'actualitza el nom (l'email no ha variat).
     User.findByIdAndUpdate(req.user._id, { name }, { new: true })
       .then((updatedUser) => {
         res.json({
           success: true,
           message: "Perfil actualitzat correctament",
-          data: {
-            id: updatedUser._id,
-            name: updatedUser.name,
-            email: updatedUser.email,
-            role: updatedUser.role,
-          },
+          data: { id: updatedUser._id, name: updatedUser.name, email: updatedUser.email, role: updatedUser.role },
         });
       })
       .catch((error) => {
-        res.status(500).json({
-          success: false,
-          message: "Error al actualizar perfil",
-          error: error.message,
-        });
+        res.status(500).json({ success: false, message: "Error al actualitzar perfil", error: error.message });
       });
   }
 };
 
 /**
- * CAMBIAR CONTRASEÑA
- * PUT /api/auth/change-password
- * Body: { currentPassword, newPassword }
+ * VERIFICAR PERMÍS
+ * Endpoint de suport per al frontend que valida capacitats sense processar lògica de negoci.
  */
-export const changePassword = (req, res) => {
-  const { currentPassword, newPassword } = req.body;
+export const checkUserPermission = (req, res) => {
+  const { permission } = req.body;
 
-  // Obtener usuario con contraseña
+  if (!permission) {
+    return res.status(400).json({ success: false, message: "El permís és obligatori" });
+  }
+
+  // Obtenim l'usuari amb la càrrega de permisos per fer la comparació.
   User.findById(req.user._id)
-    .select("+password")
-    .then((user) => {
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "Usuario no encontrado",
-        });
-      }
-
-      // Verificar contraseña actual
-      return user.comparePassword(currentPassword).then((isMatch) => {
-        if (!isMatch) {
-          return res.status(401).json({
-            success: false,
-            message: "La contraseña actual es incorrecta",
-          });
-        }
-
-        // Actualizar con nueva contraseña
-        user.password = newPassword;
-        return user.save();
-      });
+    .populate({
+      path: "roles",
+      populate: { path: "permissions" },
     })
-    .then((updatedUser) => {
-      if (!updatedUser) return;
+    .then((user) => {
+      if (!user) return res.status(404).json({ success: false, message: "Usuari no trobat" });
 
-      res.json({
-        success: true,
-        message: "Contrasenya canviada correctament",
-      });
+      // Verifiquem si el permís demanat es troba dins de l'array de permisos efectius.
+      const permissions = user.getEffectivePermissions();
+      const hasPermission = permissions.includes(permission);
+
+      if (hasPermission) {
+        res.json({ success: true, hasPermission: true, message: "Tens permís per fer aquesta acció" });
+      } else {
+        res.status(403).json({ success: false, hasPermission: false, message: "No tens permís" });
+      }
     })
     .catch((error) => {
-      res.status(500).json({
-        success: false,
-        message: "Error al cambiar contraseña",
-        error: error.message,
-      });
+      res.status(500).json({ success: false, message: "Error al verificar el permís", error: error.message });
     });
 };
