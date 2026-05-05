@@ -1,15 +1,17 @@
+// src/routes/authRoutes.js
 import express from "express";
 
-// Importar controladores de autenticación
+// Importar controladores de autenticació
 import {
   register,
   login,
   getMe,
   updateProfile,
   changePassword,
+  checkUserPermission,
 } from "../controllers/authController.js";
 
-// Importar validadores
+// Importar validadors i middlewares
 import {
   registerValidation,
   loginValidation,
@@ -17,71 +19,64 @@ import {
   changePasswordValidation,
   handleValidationErrors,
 } from "../middleware/validators/authValidators.js";
-
-// Importar middleware de autenticación
 import auth from "../middleware/auth.js";
 
 const router = express.Router();
 
-/** RUTAS PÚBLICAS (No requieren autenticación) */
+/* ------------------------------------------------------------
+   RUTES PÚBLIQUES
+------------------------------------------------------------ */
 
-/**
- * @route   POST /api/auth/register
- * @desc    Registrar nuevo usuario
- * @access  Public
- */
+// Registrar nou usuari
 router.post(
   "/register",
-  registerValidation,        // Validar datos de entrada
-  handleValidationErrors,    // Manejar errores de validación
-  register                   // Ejecutar controlador
+  registerValidation,
+  handleValidationErrors,
+  register
 );
 
-/**
- * @route   POST /api/auth/login
- * @desc    Iniciar sesión
- * @access  Public
- */
+// Iniciar sessió
 router.post(
   "/login",
-  loginValidation,           // Validar datos de entrada
-  handleValidationErrors,    // Manejar errores de validación
-  login                      // Ejecutar controlador
+  loginValidation,
+  handleValidationErrors,
+  login
 );
 
-/** RUTAS PROTEGIDAS (Requieren autenticación)*/
+/* ------------------------------------------------------------
+   RUTES PROTEGIDES (Requereixen Token)
+------------------------------------------------------------ */
 
-/**
- * @route   GET /api/auth/me
- * @desc    Obtener perfil del usuario actual
- * @access  Private (requiere token)
- */
+// Obtenir perfil de l'usuari actual
 router.get("/me", auth, getMe);
 
-/**
- * @route   PUT /api/auth/profile
- * @desc    Actualizar perfil de usuario
- * @access  Private (requiere token)
- */
+// Actualitzar perfil (nom, email, etc.)
 router.put(
   "/profile",
-  auth,                      // Verificar autenticación
-  updateProfileValidation,   // Validar datos
-  handleValidationErrors,    // Manejar errores
-  updateProfile              // Ejecutar controlador
+  auth,
+  updateProfileValidation,
+  handleValidationErrors,
+  updateProfile
 );
 
-/**
- * @route   PUT /api/auth/change-password
- * @desc    Cambiar contraseña
- * @access  Private (requiere token)
- */
+// Canviar contrasenya
 router.put(
   "/change-password",
-  auth,                       // Verificar autenticación
-  changePasswordValidation,   // Validar datos
-  handleValidationErrors,     // Manejar errores
-  changePassword              // Ejecutar controlador
+  auth,
+  changePasswordValidation,
+  handleValidationErrors,
+  changePassword
 );
+
+/* ------------------------------------------------------------
+   VERIFICACIÓ DE SEGURETAT PER AL FRONTEND
+------------------------------------------------------------ */
+
+/**
+ * Verifica si l'usuari té un permís específic.
+ * Útil per mostrar/amagar botons o seccions a la interfície.
+ * Body: { "permission": "tasks:delete" }
+ */
+router.post("/check-permission", auth, checkUserPermission);
 
 export default router;
