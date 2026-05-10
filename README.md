@@ -1,100 +1,415 @@
-# T7 – Gestor de Tasques (Advanced Auth & RBAC)
+#  Task Manager API (JWT Avançat + Jerarquia de Rols)
 
-Sistema d'alt rendiment per a la gestió de tasques, implementat amb **Node.js**, **Express** i **MongoDB**. Aquesta versió inclou un sistema avançat d'**Autorització Basada en Rols (RBAC)** amb permisos granulars i auditoria completa.
+Sistema avançat de gestió de tasques desenvolupat amb **Node.js**, **Express** i **MongoDB**, enfocat en la seguretat, escalabilitat i control d'accés professional.
+
+Aquesta versió implementa:
+
+- 🔐 JWT Avançat (Access Token + Refresh Token)
+- 🏛️ Jerarquia de Rols amb herència
+- 🤝 Delegació temporal de permisos
+- 📊 Auditoria avançada
+- ⚡ Rate limiting per rol
+- 🛡️ Seguretat HTTP amb Helmet i CORS
+- 🚫 Blacklist de tokens per logout segur
 
 ---
 
-## 📋 Descripció del projecte
+# 📋 Descripció del projecte
 
-Aquesta API REST ofereix un marc de seguretat de nivell empresarial per a la gestió de tasques:
+L'objectiu del projecte és crear una API REST professional amb un sistema complet d'autenticació i autorització avançada.
 
-- **Autenticació robusta:** Mitjançant JWT amb xifratge de contrasenyes amb `bcrypt`.
-- **RBAC Granular (Basat en Permisos):** Els usuaris no tenen només un "rol fix", sinó una col·lecció de permisos atòmics (ex: `tasks:create`, `audit:read`).
-- **Sistema de Rols Dinàmics:** Possibilitat de gestionar rols (Admin, Editor, User, Viewer) i assignar-los permisos sense modificar el codi.
-- **Registre d'Auditoria:** Totes les accions crítiques i els intents d'accés queden registrats per a un control total de seguretat.
-- **Auto-Seeding:** El sistema es configura automàticament en arrencar, garantint que els permisos i rols base existeixin a la base de dades.
+El sistema permet:
+
+- Gestionar tasques amb permisos granulars
+- Gestionar usuaris, rols i permisos
+- Delegar permisos temporalment entre usuaris
+- Registrar totes les accions importants
+- Aplicar seguretat avançada a nivell HTTP i autenticació
+
+---
+
+# 🚀 Característiques principals
+
+## 🔐 JWT Avançat
+
+El sistema utilitza dos tipus de tokens:
+
+### Access Token
+- Durada curta (15 minuts)
+- S'utilitza per accedir a recursos protegits
+- Menor risc en cas de robatori
+
+### Refresh Token
+- Durada llarga (7 dies)
+- Permet renovar l'access token
+- Es guarda en blacklist al logout
+
+---
+
+## 🏛️ Jerarquia de Rols
+
+Els rols tenen herència de permisos.
+
+```text
+SUPER_ADMIN
+   └── ADMIN
+         └── MANAGER
+               └── USER
+                     └── VIEWER
+
+
+## 🏛️ Jerarquia de Rols
+
+El sistema implementa herència de permisos entre rols:
+
+```bash
+SUPER_ADMIN
+   └── ADMIN
+         └── MANAGER
+               └── USER
+                     └── VIEWER
+```
+
+Exemple:
+
+```bash
+ADMIN hereta permisos de MANAGER
+
+MANAGER hereta permisos de USER
+
+USER hereta permisos de VIEWER
+```
+
+Això evita duplicació de permisos i facilita el manteniment.
+
+---
+
+## 🤝 Delegació de Permisos
+
+Els usuaris poden delegar permisos temporalment.
+
+Exemple:
+
+```bash
+Un manager pot delegar tasks:assign
+
+La delegació té data d'expiració
+
+El sistema revoca automàticament permisos expirats
+```
+
+---
+
+## 📊 Auditoria Avançada
+
+Es registren:
+
+```bash
+- Accions realitzades
+- Usuari que les fa
+- IP
+- User Agent
+- Canvis realitzats
+- Estat de l'acció
+```
+
+Exemple:
+
+```json
+{
+  "action": "tasks:update",
+  "status": "success",
+  "ipAddress": "192.168.1.10"
+}
+```
+
+---
+
+## ⚡ Rate Limiting per Rol
+
+Cada rol té límits diferents:
+
+| Rol | Límit |
+|------|--------|
+| SUPER_ADMIN | 1000 req/min |
+| ADMIN | 500 req/min |
+| MANAGER | 200 req/min |
+| USER | 100 req/min |
+| VIEWER | 50 req/min |
 
 ---
 
 ## 🛠 Tecnologies utilitzades
 
-- **Node.js & Express**
-- **MongoDB + Mongoose**
-- **bcrypt** – Seguretat i xifratge de contrasenyes.
-- **jsonwebtoken (JWT)** – Gestió de sessions i autenticació.
-- **express-validator** – Validació i sanitització de dades.
+```bash
+- Node.js
+- Express.js
+- MongoDB
+- Mongoose
+- JWT
+- bcrypt
+- Helmet
+- CORS
+- express-rate-limit
+- dotenv
+```
 
 ---
 
 ## 📂 Estructura del projecte
 
-```text
-task-manager-api/
-├── models/
-│   ├── User.js
-│   ├── Task.js
-│   ├── Role.js            
-│   ├── Permission.js      
-│   └── AuditLog.js        
-├── seeds/                 
-│   ├── permissionSeed.js
-│   └── roleSeed.js
-├── middleware/
-│   ├── auth.js            
-│   ├── checkPermission.js 
-│   └── roleCheck.js       
-├── routes/
-│   ├── authRoutes.js
-│   ├── adminRoutes.js
-│   └── taskRoutes.js
-└── ...
+```bash
+projecte-t9/
+│
+├── src/
+│   ├── config/
+│   │   └── db.js
+│   │
+│   ├── controllers/
+│   │   ├── authController.js
+│   │   ├── taskController.js
+│   │   ├── roleController.js
+│   │   ├── permissionController.js
+│   │   ├── delegationController.js
+│   │   ├── userController.js
+│   │   └── auditController.js
+│   │
+│   ├── middleware/
+│   │   ├── authMiddleware.js
+│   │   ├── auditMiddleware.js
+│   │   ├── roleMiddleware.js
+│   │   └── rateLimiter.js
+│   │
+│   ├── models/
+│   │   ├── User.js
+│   │   ├── Role.js
+│   │   ├── Permission.js
+│   │   ├── Task.js
+│   │   ├── Delegation.js
+│   │   ├── AuditLog.js
+│   │   └── TokenBlacklist.js
+│   │
+│   ├── routes/
+│   │   ├── authRoutes.js
+│   │   ├── taskRoutes.js
+│   │   ├── roleRoutes.js
+│   │   ├── permissionRoutes.js
+│   │   ├── delegationRoutes.js
+│   │   ├── userRoutes.js
+│   │   └── auditRoutes.js
+│   │
+│   ├── services/
+│   │   └── delegationService.js
+│   │
+│   └── utils/
+│       ├── errorResponse.js
+│       ├── seedPermissions.js
+│       └── seedRoles.js
+│
+├── uploads/
+├── .env
+├── package.json
+└── README.md
 ```
 
-# Documentació de Seguretat i Rutes - API Task Manager
+---
 
-## 🔐 Seguretat i Autorització
+## 🔑 Autenticació
 
-El sistema utilitza una arquitectura de seguretat de tres capes:
+### Login
 
-* **Autenticació:** El middleware `auth` verifica que el token JWT enviat a la capçalera sigui vàlid.
-* **Autorització (RBAC):** El middleware `checkPermission("permis:accio")` verifica si el rol de l'usuari conté el permís específic necessari.
-* **Auditoria:** Cada operació (crear, editar, eliminar o fallades d'accés) genera un registre automàtic al model `AuditLog`.
+```bash
+POST /api/auth/login
+```
 
+Body:
+
+```json
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
+```
+
+Resposta:
+
+```json
+{
+  "accessToken": "xxxxx.yyyyy.zzzzz",
+  "refreshToken": "aaaaa.bbbbb.ccccc",
+  "expiresIn": 900
+}
+```
 
 ---
 
-## 🔑 Rutes de l'API
+### Refresh Token
 
-### 👤 Autenticació (`/api/auth`)
+```bash
+POST /api/auth/refresh
+```
 
-| Mètode | Ruta | Descripció | Protegida |
-| :--- | :--- | :--- | :---: |
-| POST | `/register` | Registre de nou usuari | ❌ |
-| POST | `/login` | Inici de sessió (Retorna JWT) | ❌ |
-| POST | `/check-permission` | Verifica permisos per al frontend | ✅ |
+Body:
 
-### 📋 Tasques (`/api/tasks`)
-
-| Mètode | Ruta | Permís Requerit |
-| :--- | :--- | :--- |
-| GET | `/` | `tasks:read` |
-| POST | `/` | `tasks:create` |
-| PUT | `/:id` | `tasks:update` |
-| DELETE | `/:id` | `tasks:delete` |
-| GET | `/stats` | `tasks:read` |
-
-### 👑 Administració i Control (`/api/admin`)
-
-| Mètode | Ruta | Descripció | Permís |
-| :--- | :--- | :--- | :--- |
-| GET | `/users/:id/permissions` | Veure permisos efectius d'un usuari | `users:read` |
-| POST | `/roles` | Crear nous rols | `roles:manage` |
-| POST | `/permissions` | Crear nous permisos | `permissions:manage` |
-| GET | `/audit-logs` | Llistar historial d'activitat | `audit:read` |
+```json
+{
+  "refreshToken": "aaaaa.bbbbb.ccccc"
+}
+```
 
 ---
 
-## ⚙️ Instal·lació i Seed
+### Logout
+
+```bash
+POST /api/auth/logout
+```
+
+El sistema:
+
+```bash
+- revoca access token
+- revoca refresh token
+- afegeix tokens a blacklist
+```
+
+---
+
+## 🔑 Rutes principals
+
+### 🔐 Auth
+
+| Mètode | Ruta |
+|--------|-------|
+| POST | /api/auth/register |
+| POST | /api/auth/login |
+| POST | /api/auth/refresh |
+| POST | /api/auth/logout |
+
+---
+
+### 📋 Tasks
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/tasks |
+| POST | /api/tasks |
+| PUT | /api/tasks/:id |
+| DELETE | /api/tasks/:id |
+| GET | /api/tasks/stats |
+
+---
+
+### 👥 Users
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/users |
+| GET | /api/users/:id |
+| PUT | /api/users/:id |
+| DELETE | /api/users/:id |
+| GET | /api/users/:id/permissions |
+
+---
+
+### 🎭 Roles
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/roles |
+| GET | /api/roles/:id |
+| POST | /api/roles |
+| PUT | /api/roles/:id |
+| DELETE | /api/roles/:id |
+| GET | /api/roles/:id/hierarchy |
+| GET | /api/roles/:id/permissions |
+
+---
+
+### 🔑 Permissions
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/permissions |
+| GET | /api/permissions/:id |
+| POST | /api/permissions |
+| PUT | /api/permissions/:id |
+| DELETE | /api/permissions/:id |
+
+---
+
+### 🤝 Delegations
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/delegations |
+| GET | /api/delegations/:id |
+| POST | /api/delegations |
+| DELETE | /api/delegations/:id |
+| GET | /api/delegations/user/:userId |
+
+---
+
+### 📊 Audit
+
+| Mètode | Ruta |
+|--------|-------|
+| GET | /api/audit/logs |
+| GET | /api/audit/stats |
+| GET | /api/audit/stats/user/:userId |
+
+---
+
+## 🔒 Seguretat implementada
+
+### Helmet
+
+Protecció de headers HTTP:
+
+```bash
+- CSP
+- HSTS
+- X-Frame-Options
+- etc.
+```
+
+---
+
+### CORS
+
+Configuració d'orígens permesos:
+
+```js
+origin: process.env.CLIENT_URL || "*"
+```
+
+---
+
+### Rate Limiting
+
+Protecció davant:
+
+```bash
+- spam
+- brute force
+- abusos d'API
+```
+
+---
+
+### Token Blacklist
+
+Els tokens revocats:
+
+```bash
+- no poden reutilitzar-se
+- s'emmagatzemen temporalment
+- s'eliminen automàticament en expirar
+```
+
+---
+
+## ⚙️ Instal·lació
 
 ### 1️⃣ Instal·lar dependències
 
@@ -102,35 +417,110 @@ El sistema utilitza una arquitectura de seguretat de tres capes:
 npm install
 ```
 
-## ⚙️ Configuració inicial (Seeding)
+---
 
-El sistema és **auto-gestionat**. En arrencar per primer cop, el servidor executa automàticament els scripts de càrrega inicial:
+### 2️⃣ Configurar `.env`
 
-* **Permisos de Sistema:** Es creen les accions atòmiques per a tasques, usuaris, rols i auditoria.
-* **Rols base:** Es generen els perfils predefinits (**Admin, User, Editor, Viewer**).
-* **Protecció de dades:** Els permisos i rols crítics es marquen amb la propietat `isSystemRole: true` per evitar esborrats accidentals des de l'API.
+```env
+PORT=3000
+MONGO_URI=mongodb://localhost:27017/taskmanager
+JWT_SECRET=supersecret
+CLIENT_URL=http://localhost:5173
+```
+
+---
+
+### 3️⃣ Executar projecte
 
 ```bash
-# Comanda per arrencar el servidor i executar el seeding
 npm run dev
 ```
 
-## ❌ Gestió d'Errors i Auditoria
-El sistema controla l'accés mitjançant respostes HTTP estandarditzades:
+---
 
-* **401 Unauthorized**: El token JWT és absent, ha caducat o és invàlid.
+## 🌱 Seeding automàtic
 
-* **403 Forbidden**: L'usuari està autenticat correctament però el seu rol no té el permís necessari (Ex: un usuari amb rol user intentant accedir a /api/admin/audit-logs).
-
-* **Respostes estandarditzades**: Totes les respostes de l'API mantenen una estructura consistent per facilitar la integració amb el frontend:
+En iniciar el servidor:
 
 ```bash
+- es creen permisos base
+- es creen rols base
+- es genera jerarquia inicial
+```
+
+Ordre:
+
+```bash
+1. Permissions
+2. Roles
+```
+
+---
+
+## 🧪 Testing amb Postman
+
+El projecte inclou proves de:
+
+```bash
+- autenticació
+- jerarquia
+- permisos
+- delegacions
+- auditoria
+- seguretat
+```
+
+Total aproximat:
+
+```bash
+✅ 51 proves realitzades
+```
+
+---
+
+## ❌ Gestió d'Errors
+
+### 401 Unauthorized
+
+```bash
+Token invàlid o expirat.
+```
+
+### 403 Forbidden
+
+```bash
+Usuari sense permisos.
+```
+
+### 404 Not Found
+
+```bash
+Ruta no trobada.
+```
+
+### 429 Too Many Requests
+
+```bash
+Límit de peticions excedit.
+```
+
+---
+
+## 📌 Exemple de resposta estàndard
+
+```json
 {
-  "success": boolean,
-  "data/message": any
+  "success": true,
+  "message": "Operació correcta",
+  "data": {}
 }
 ```
 
+---
 
-## 👤 Autor  
-**Zaine A.** Projecte acadèmic – DAW
+## 👤 Autor
+
+```bash
+Zaine A.
+Projecte acadèmic – DAW
+```
