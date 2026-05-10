@@ -21,6 +21,9 @@ import {
 } from "../middleware/validators/authValidators.js";
 import auth from "../middleware/auth.js";
 
+import { forgotPassword, resetPassword, refresh, logout } from "../controllers/authController.js";
+import { authRateLimiter } from "../middleware/rateLimiter.js";
+
 const router = express.Router();
 
 /* ------------------------------------------------------------
@@ -67,6 +70,17 @@ router.put(
   handleValidationErrors,
   changePassword
 );
+
+
+// Recuperació de contrasenya amb protecció extra
+router.post("/forgot-password", authRateLimiter, forgotPassword);
+router.post("/reset-password/:token", authRateLimiter, resetPassword);
+
+// Refresh Token
+router.post("/refresh", refresh);
+
+// --- RUTES PROTEGIDES ---
+router.post("/logout", auth, logout);
 
 /* ------------------------------------------------------------
    VERIFICACIÓ DE SEGURETAT PER AL FRONTEND

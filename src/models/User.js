@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
+import permissionService from "../services/permissionService.js";
 
 /** Define la estructura de los documentos de usuario en MongoDB */
 const userSchema = new mongoose.Schema(
@@ -179,6 +180,17 @@ userSchema.methods.toJSON = function () {
   const userObject = this.toObject();
   delete userObject.password;            // Mai retornar la contraseña
   return userObject;
+};
+
+/**
+ * MÉTODO: getEffectivePermissions (ACTUALIZADO T9)
+ * Usa el permissionService para resolver la jerarquía completa
+ * y las delegaciones temporales.
+ */
+userSchema.methods.getEffectivePermissions = async function () {
+  // Llamamos al servicio pasando el documento de usuario actual
+  const { permissionNames } = await permissionService.getUserEffectivePermissions(this);
+  return permissionNames;
 };
 
 /**
