@@ -195,3 +195,38 @@ export const deletePermission = (req, res) => {
       });
     });
 };
+
+/**
+ * OBTENIR PERMÍS PER ID
+ */
+export const getPermissionById = (req, res) => {
+  const { id } = req.params;
+
+  Permission.findById(id)
+    .then((permission) => {
+      if (!permission) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "Permís no trobat" 
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          id: permission._id,
+          name: permission.name,
+          description: permission.description,
+          category: permission.category,
+          isSystemPermission: permission.isSystemPermission
+        }
+      });
+    })
+    .catch((error) => {
+      res.status(500).json({
+        success: false,
+        message: "Error al obtenir el permís",
+        error: error.message
+      });
+    });
+};

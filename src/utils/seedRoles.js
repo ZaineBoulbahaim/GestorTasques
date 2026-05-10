@@ -95,11 +95,7 @@ const systemRoles = [
     level: 5,
     parentRoleName: "admin",
     description: "Super administrador amb control total del sistema",
-    // Permisos PROPIS exclusius del super_admin
-    permissions: [
-      "system:configure",
-      "system:backup",
-    ],
+    permissions: [],
     isSystemRole: true,
   },
 

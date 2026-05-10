@@ -107,6 +107,13 @@ export const createDelegation = async (req, res) => {
     const { toUserId, permission, daysValid, reason } = req.body;
     const fromUserId = req.user._id;
 
+    if (daysValid <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Delegació invàlida: els dies han de ser positius"
+      });
+    }
+
     // Validacions bàsiques
     if (!toUserId || !permission || !daysValid) {
       return res.status(400).json({

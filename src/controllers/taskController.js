@@ -3,12 +3,10 @@ import AuditLog from "../models/AuditLog.js";
 
 /**
  * CREAR NOVA TASCA
- * Registra una tasca vinculada a l'usuari i genera una entrada a l'historial d'auditoria.
  */
 export const createTask = (req, res) => {
   const { title, description, cost, hours_estimated, image } = req.body;
 
-  // 1. Instanciem la tasca assignant l'ID de l'usuari des del token (req.user)
   const task = new Task({
     title,
     description,
@@ -20,24 +18,17 @@ export const createTask = (req, res) => {
 
   let savedTaskData;
 
-  // 2. Persistència en base de dades
   task
     .save()
     .then((savedTask) => {
       savedTaskData = savedTask;
-
-      // 3. AUDITORIA: Registrem qui ha creat el recurs i amb quines dades.
-      // El mètode AuditLog.log captura automàticament IP i UserAgent mitjançant 'req'.
       return AuditLog.log(
         req.user._id,
         "tasks:create",
         savedTask._id.toString(),
         "task",
         "success",
-        {
-          title: savedTask.title,
-          cost: savedTask.cost,
-        },
+        { title: savedTask.title, cost: savedTask.cost },
         req
       );
     })
@@ -49,19 +40,86 @@ export const createTask = (req, res) => {
       });
     })
     .catch((error) => {
-      res.status(400).json({ success: false, message: "Error al crear la tasca", error: error.message });
+      res.status(400).json({
+        success: false,
+        message: "Error al crear la tasca",
+        error: error.message,
+      });
+    });
+};
+
+/**
+ * LLISTAR TOTES LES TASQUES DE L'USUARI
+ * Suporta paginació: ?page=1&limit=10
+ */
+export const getAllTasks = (req, res) => {
+  const { page = 1, limit = 10, completed } = req.query;
+  const skip = (parseInt(page) - 1) * parseInt(limit);
+
+  // Filtre: només les tasques de l'usuari autenticat
+  const filter = { user: req.user._id };
+
+  // Filtre opcional per estat
+  if (completed !== undefined) {
+    filter.completed = completed === "true";
+  }
+
+  Promise.all([
+    Task.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit)),
+    Task.countDocuments(filter),
+  ])
+    .then(([tasks, totalCount]) => {
+      res.json({
+        success: true,
+        count: tasks.length,
+        totalCount,
+        page: parseInt(page),
+        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        data: tasks,
+      });
+    })
+    .catch((error) => {
+      res.status(500).json({
+        success: false,
+        message: "Error al obtenir les tasques",
+        error: error.message,
+      });
+    });
+};
+
+/**
+ * OBTENIR UNA TASCA PER ID
+ */
+export const getTaskById = (req, res) => {
+  Task.findOne({ _id: req.params.id, user: req.user._id })
+    .then((task) => {
+      if (!task) {
+        return res.status(404).json({
+          success: false,
+          message: "Tasca no trobada o no tens permisos",
+        });
+      }
+      res.json({ success: true, data: task });
+    })
+    .catch((error) => {
+      res.status(500).json({
+        success: false,
+        message: "Error al obtenir la tasca",
+        error: error.message,
+      });
     });
 };
 
 /**
  * ACTUALITZAR TASCA
- * Gestiona la modificació de tasques i el "diff" (diferència) entre dades velles i noves.
  */
 export const updateTask = (req, res) => {
   let originalTask;
   let updatedTaskData;
 
-  // 1. Recuperem l'estat actual de la tasca abans de sobreescriure-la per poder comparar canvis.
   Task.findOne({ _id: req.params.id, user: req.user._id })
     .then((task) => {
       if (!task) {
@@ -71,7 +129,6 @@ export const updateTask = (req, res) => {
         });
       }
 
-      // Guardem una "snapshot" dels valors originals.
       originalTask = {
         title: task.title,
         description: task.description,
@@ -80,7 +137,6 @@ export const updateTask = (req, res) => {
         completed: task.completed,
       };
 
-      // 2. Executem l'actualització amb validació de dades activa.
       return Task.findOneAndUpdate(
         { _id: req.params.id, user: req.user._id },
         req.body,
@@ -91,7 +147,6 @@ export const updateTask = (req, res) => {
       if (!task) return;
       updatedTaskData = task;
 
-      // Lògica de negoci: Si es marca com a completada ara, registrem el timestamp de finalització.
       if (task.completed && !task.finished_at) {
         task.finished_at = new Date();
         return task.save();
@@ -101,17 +156,14 @@ export const updateTask = (req, res) => {
     .then((finalTask) => {
       if (!finalTask) return;
 
-      // 3. CÀLCUL DE CANVIS: Comparem camp per camp per guardar només el que ha variat a l'auditoria.
       const changes = {};
       const fields = ["title", "description", "cost", "hours_estimated", "completed"];
-      
-      fields.forEach(field => {
+      fields.forEach((field) => {
         if (originalTask[field] !== finalTask[field]) {
           changes[field] = `${originalTask[field]} → ${finalTask[field]}`;
         }
       });
 
-      // 4. AUDITORIA: Registrem l'acció amb el detall de les modificacions.
       return AuditLog.log(
         req.user._id,
         "tasks:update",
@@ -130,13 +182,16 @@ export const updateTask = (req, res) => {
       });
     })
     .catch((error) => {
-      res.status(400).json({ success: false, message: "Error al actualitzar", error: error.message });
+      res.status(400).json({
+        success: false,
+        message: "Error al actualitzar",
+        error: error.message,
+      });
     });
 };
 
 /**
  * ELIMINAR TASCA
- * Esborra el recurs i registra una còpia de seguretat de les dades eliminades al log d'auditoria.
  */
 export const deleteTask = (req, res) => {
   let deletedTaskData;
@@ -144,12 +199,14 @@ export const deleteTask = (req, res) => {
   Task.findOneAndDelete({ _id: req.params.id, user: req.user._id })
     .then((task) => {
       if (!task) {
-        return res.status(404).json({ success: false, message: "Tasca no trobada" });
+        return res.status(404).json({
+          success: false,
+          message: "Tasca no trobada",
+        });
       }
 
       deletedTaskData = task;
 
-      // AUDITORIA: Guardem el títol de la tasca eliminada perquè l'administrador sàpiga què s'ha perdut.
       return AuditLog.log(
         req.user._id,
         "tasks:delete",
@@ -168,23 +225,23 @@ export const deleteTask = (req, res) => {
       });
     })
     .catch((error) => {
-      res.status(500).json({ success: false, message: "Error al eliminar", error: error.message });
+      res.status(500).json({
+        success: false,
+        message: "Error al eliminar",
+        error: error.message,
+      });
     });
 };
 
 /**
  * ESTADÍSTIQUES DE TASQUES
- * Utilitza el motor d'agregació de MongoDB per calcular mètriques en temps real.
  */
 export const getTaskStats = (req, res) => {
   Task.aggregate([
-    // ETAPA 1: Filtrem només les tasques que pertanyen a l'usuari actual.
     { $match: { user: req.user._id } },
-
-    // ETAPA 2: Processem els documents per calcular totals, mitjanes i sumes condicionals.
     {
       $group: {
-        _id: null, // Agrupem tot el set de dades filtrat en un sol objecte de resultats.
+        _id: null,
         totalTasks: { $sum: 1 },
         completedTasks: { $sum: { $cond: ["$completed", 1, 0] } },
         pendingTasks: { $sum: { $cond: ["$completed", 0, 1] } },
@@ -196,17 +253,25 @@ export const getTaskStats = (req, res) => {
     },
   ])
     .then((stats) => {
-      // Si l'usuari no té tasques, l'array d'agregació estarà buit. Retornem valors a zero.
       if (stats.length === 0) {
         return res.json({
           success: true,
-          data: { totalTasks: 0, completedTasks: 0, pendingTasks: 0, totalCost: 0, totalHours: 0 },
+          data: {
+            totalTasks: 0,
+            completedTasks: 0,
+            pendingTasks: 0,
+            totalCost: 0,
+            totalHours: 0,
+          },
         });
       }
-
       res.json({ success: true, data: stats[0] });
     })
     .catch((error) => {
-      res.status(500).json({ success: false, message: "Error en estadístiques", error: error.message });
+      res.status(500).json({
+        success: false,
+        message: "Error en estadístiques",
+        error: error.message,
+      });
     });
 };

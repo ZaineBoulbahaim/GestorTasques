@@ -5,8 +5,7 @@ import PasswordReset from "../models/PasswordReset.js";
 import AuditLog from "../models/AuditLog.js";
 import jwtService from "../services/jwtService.js";
 import emailService from "../services/emailService.js";
-import TokenBlacklist from "../models/TokenBlacklist.js";
-
+import jwt from "jsonwebtoken";
 /**
  * _buildTokenResponse(user)
  * Genera els dos tokens (access + refresh) i retorna l'objecte de resposta estàndard.
@@ -40,22 +39,30 @@ const _buildTokenResponse = async (user) => {
 export const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
+
+    // 1. Verificar si el rol existe
     const userRole = await Role.findOne({ name: "user" });
-    
-    if (!userRole) return res.status(500).json({ success: false, message: "Rol 'user' no trobat" });
+    if (!userRole) {
+      return res.status(500).json({ success: false, message: "Rol 'user' no trobat" });
+    }
 
+    // 2. Verificar si el email ya existe
     const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ success: false, message: "Email ja registrat" });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "Email ja registrat" });
+    }
 
+    // 3. Crear el nuevo usuario
     const newUser = new User({
       name,
       email,
       password,
-      roles: [userRole._id], // Usamos solo el array de roles si es posible
+      roles: [userRole._id],
       isActive: true,
     });
     await newUser.save();
 
+    // 4. Poblar roles y permisos para la respuesta del token
     const populatedUser = await User.findById(newUser._id).populate({
       path: "roles",
       populate: { path: "permissions" },
@@ -63,10 +70,23 @@ export const register = async (req, res) => {
 
     const tokenData = await _buildTokenResponse(populatedUser);
 
-    await AuditLog.log(populatedUser._id, "REGISTER", "Nou usuari registrat");
+    // 5. REGISTRO EN AUDITORÍA (Corregido para evitar el error de validación)
+    try {
+      await AuditLog.create({
+        userId: populatedUser._id,
+        action: "REGISTER",
+        status: "success", // Campo obligatorio que faltaba
+        details: "Nou usuari registrat",
+        ip: req.ip
+      });
+    } catch (auditError) {
+      console.warn("AuditLog ha fallat, però el registre continua:", auditError.message);
+    }
 
     return res.status(201).json({ success: true, ...tokenData });
+
   } catch (error) {
+    console.error("REGISTER ERROR:", error);
     return res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -74,19 +94,36 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email }).populate({
+
+    // 1. Validar que los campos no vengan vacíos
+    if (!email || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Email i contrasenya requerits" 
+      });
+    }
+
+    // 2. Buscar usuario (asegúrate de incluir el password si tiene select: false)
+    const user = await User.findOne({ email }).select("+password").populate({
       path: "roles",
       populate: { path: "permissions" },
     });
 
-    if (!user || !(await user.comparePassword(password))) {
+    // 3. Verificar si el usuario existe
+    if (!user) {
       return res.status(401).json({ success: false, message: "Credencials incorrectes" });
     }
 
-    const tokenData = await _buildTokenResponse(user);
-    await AuditLog.log(user._id, "LOGIN", "Sessió iniciada");
+    // 4. Comparar (Aquí es donde saltaba el error)
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Credencials incorrectes" });
+    }
 
+    // 5. Generar tokens y respuesta...
+    const tokenData = await _buildTokenResponse(user);
     res.json({ success: true, ...tokenData });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -103,7 +140,9 @@ export const refresh = async (req, res) => {
       populate: { path: "permissions" }
     });
 
-    if (!user || !user.isActive) return res.status(401).json({ success: false, message: "Usuari no vàlid" });
+    if (!user || user.isActive === false) { 
+    return res.status(401).json({ success: false, message: "Usuari no vàlid" });
+}
 
     const tokenData = await _buildTokenResponse(user);
     res.json({ success: true, ...tokenData });
@@ -114,18 +153,51 @@ export const refresh = async (req, res) => {
 
 export const logout = async (req, res) => {
   try {
-    const accessToken = req.token; 
+    const accessToken = req.headers.authorization?.split(" ")[1];
     const { refreshToken } = req.body;
 
-    if (accessToken) await TokenBlacklist.addToBlacklist(accessToken);
-    if (refreshToken) await TokenBlacklist.addToBlacklist(refreshToken);
+    // Función auxiliar para registrar el token en la blacklist cumpliendo el modelo
+    const blacklistToken = async (token, type) => {
+      if (!token) return;
+      
+      // Decodificamos el token para obtener userId y la fecha de expiración natural (exp)
+      const decoded = jwt.decode(token);
+      if (!decoded) return;
 
-    // Si el middleware 'auth' funciona, req.user.id existeix
-    if (req.user) await AuditLog.log(req.user.id, "LOGOUT", "Sessió tancada");
+      const userId = decoded.userId || decoded.id;
+      const expiresAt = new Date(decoded.exp * 1000); // JWT usa segundos, JS usa milisegundos
 
-    return res.json({ success: true, message: "Sessió tancada correctament" });
+      // Usamos el método correcto: revokeToken
+      await TokenBlacklist.revokeToken(token, userId, type, expiresAt);
+    };
+
+    // Revocamos ambos tokens
+    if (accessToken) await blacklistToken(accessToken, "access");
+    if (refreshToken) await blacklistToken(refreshToken, "refresh");
+
+    // Registro en auditoría
+    if (req.user) {
+      await AuditLog.create({
+        userId: req.user._id, 
+        action: "LOGOUT",
+        status: "success",
+        details: "Sessió tancada correctament",
+        ip: req.ip
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      message: "Sessió tancada correctament" 
+    });
+
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Error al fer logout" });
+    console.error("LOGOUT ERROR:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Error al fer logout",
+      details: error.message 
+    });
   }
 };
 

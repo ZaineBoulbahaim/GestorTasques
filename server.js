@@ -12,6 +12,11 @@ import authRoutes from "./src/routes/authRoutes.js";
 import taskRoutes from "./src/routes/taskRoutes.js";
 import uploadRoutes from "./src/routes/uploadRoutes.js";
 import adminRoutes from "./src/routes/adminRoutes.js";
+import userRoutes from "./src/routes/userRoutes.js";
+import roleRoutes from "./src/routes/roleRoutes.js";
+import permissionRoutes from "./src/routes/permissionRoutes.js";
+import delegationRoutes from "./src/routes/delegationRoutes.js";
+import auditRoutes from "./src/routes/auditRoutes.js";
 
 // Middlewares
 import { errorHandler } from "./src/utils/errorResponse.js";
@@ -59,6 +64,13 @@ app.use("/uploads", express.static(path.join(path.resolve(), "uploads")));
 // ── Auditoria global ──────────────────────────────────────────────────────────
 // Ha d'anar ABANS de les rutes per interceptar les respostes
 app.use(auditMiddleware);
+
+
+app.use("/api/users", userRoutes);
+app.use("/api/roles", roleRoutes);
+app.use("/api/permissions", permissionRoutes);
+app.use("/api/delegations", delegationRoutes);
+app.use("/api/audit", auditRoutes);
 
 // ─── HEALTH CHECK ────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {

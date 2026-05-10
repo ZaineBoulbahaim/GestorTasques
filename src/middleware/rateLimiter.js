@@ -1,4 +1,4 @@
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 /**
  * RATE LIMITER T9 — PER NIVELLS DE ROL
@@ -89,8 +89,7 @@ export const dynamicRateLimiter = rateLimit({
   // Així cada usuari té el seu propi comptador, no compartit per IP
   keyGenerator: (req) => {
     const userId = req.user?._id?.toString() || "anonymous";
-    const ip = req.ip || req.connection.remoteAddress;
-    return `${ip}_${userId}`;
+    return `${ipKeyGenerator(req)}_${userId}`;
   },
 
   message: (req) => ({
@@ -120,7 +119,7 @@ export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,           // 15 minuts
   max: 10,                             // Màxim 10 intents
 
-  keyGenerator: (req) => req.ip || req.connection.remoteAddress,
+  keyGenerator: (req) => ipKeyGenerator(req),
 
   message: {
     success: false,
@@ -144,7 +143,7 @@ export const strictRateLimiter = rateLimit({
   windowMs: 30 * 60 * 1000,           // 30 minuts
   max: 5,
 
-  keyGenerator: (req) => req.ip || req.connection.remoteAddress,
+  keyGenerator: (req) => ipKeyGenerator(req),
 
   message: {
     success: false,

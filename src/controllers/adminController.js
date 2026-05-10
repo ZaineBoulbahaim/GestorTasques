@@ -240,3 +240,109 @@ export const getSystemStats = (req, res) => {
       });
     });
 };
+
+export const getUserById = (req, res) => {
+  const { id } = req.params;
+
+  User.findById(id)
+    .select("-password")
+    .populate("roles")
+    .then((user) => {
+      if (!user) {
+        return res.status(404).json({ success: false, message: "Usuari no trobat" });
+      }
+      res.json({ success: true, data: user });
+    })
+    .catch((error) => {
+      res.status(500).json({ success: false, message: "Error al buscar l'usuari", error: error.message });
+    });
+};
+
+/** 
+ * ACTUALIZAR USUARIO
+ * PUT /api/users/:id
+ */
+export const updateUser = (req, res) => {
+  const userId = req.params.id;
+  const { firstName, lastName, name } = req.body;
+
+  // Si la prueba envía firstName/lastName pero tu modelo usa 'name'
+  const updateData = {};
+  if (name) updateData.name = name;
+  if (firstName || lastName) {
+    updateData.name = `${firstName || ''} ${lastName || ''}`.trim();
+  }
+
+  User.findByIdAndUpdate(userId, updateData, { new: true })
+    .select("-password")
+    .then((user) => {
+      if (!user) {
+        return res.status(404).json({ success: false, message: "Usuari no trobat" });
+      }
+      res.json({
+        success: true,
+        message: "Usuari actualitzat correctament",
+        data: user
+      });
+    })
+    .catch((error) => {
+      res.status(500).json({ success: false, message: error.message });
+    });
+};
+
+/** 
+ * OBTENIR PERMISOS DE L'USUARI
+ * GET /api/users/:id/permissions
+ */
+export const getUserPermissions = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Busquem l'usuari amb els seus rols i els permisos de cada rol
+    const user = await User.findById(id).populate({
+      path: "roles",
+      populate: { path: "permissions" }
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Usuari no trobat" });
+    }
+
+    // 2. Extraure permisos del ROL (aplanem l'array de rols)
+    const rolePermissions = user.roles.flatMap(role => role.permissions);
+
+    // 3. Buscar permisos DELEGATS (en la col·lecció DelegatedPermission)
+    // Importa el model DelegatedPermission a dalt de tot si no el tens!
+    let delegatedPermissions = [];
+    try {
+      const DelegatedPermission = (await import('../models/DelegatedPermission.js')).default;
+      delegatedPermissions = await DelegatedPermission.find({ 
+        toUser: id,
+        status: 'active',
+        expiryDate: { $gte: new Date() } // Que no estiguin caducats
+      }).populate('permission');
+    } catch (e) {
+      console.log("Model DelegatedPermission no trobat o no implementat encara.");
+    }
+
+    res.json({
+      success: true,
+      data: {
+        userId: user._id,
+        email: user.email,
+        rolePermissions: rolePermissions,
+        delegatedPermissions: delegatedPermissions,
+        // Unió de noms de permisos per facilitar la comprovació al frontend/test
+        allPermissionNames: [
+          ...new Set([
+            ...rolePermissions.map(p => p.name),
+            ...delegatedPermissions.map(d => d.permission.name)
+          ])
+        ]
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

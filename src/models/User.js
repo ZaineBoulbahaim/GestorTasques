@@ -63,7 +63,11 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
+  {isActive: {
+    type: Boolean,
+    default: true // Esto hará que aparezca como true automáticamente
+  }},
 );
 
 /** MIDDLEWARE PRE-SAVE
