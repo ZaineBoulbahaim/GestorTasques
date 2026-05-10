@@ -38,7 +38,7 @@ import jwt from "jsonwebtoken";
  */
 const generateAccessToken = (user) => {
   const payload = {
-    userId: user._id,
+    userId: user._id.toString(),
     email: user.email,
     role: user.role,
     roles: user.roles || [],

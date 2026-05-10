@@ -5,8 +5,7 @@ import PasswordReset from "../models/PasswordReset.js";
 import AuditLog from "../models/AuditLog.js";
 import jwtService from "../services/jwtService.js";
 import emailService from "../services/emailService.js";
-
-// ─── HELPERS PRIVATS ─────────────────────────────────────────────────────────
+import TokenBlacklist from "../models/TokenBlacklist.js";
 
 /**
  * _buildTokenResponse(user)
@@ -16,336 +15,117 @@ import emailService from "../services/emailService.js";
  * @param {Document} user - Usuari de MongoDB ja populat amb roles>permissions
  * @returns {Object} { accessToken, refreshToken, expiresIn, user }
  */
-const _buildTokenResponse = (user) => {
-  const permissions = user.getEffectivePermissions();
+const _buildTokenResponse = async (user) => {
+  const permissions = await user.getEffectivePermissions();
   const accessToken = jwtService.generateAccessToken(user);
   const refreshToken = jwtService.generateRefreshToken(user._id);
 
   return {
     accessToken,
     refreshToken,
-    expiresIn: 900,                                 // 15 minuts en segons
+    expiresIn: 900, 
     user: {
       id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role,
       roles: (user.roles || []).map((r) => ({
-        id: r._id,
-        name: r.name,
+        id: r._id || r,
+        name: r.name || 'Role',
       })),
-      permissions,
+      permissions, 
     },
   };
 };
 
-// ─── REGISTER ────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/auth/register
- * Registra un nou usuari i retorna access + refresh tokens.
- */
 export const register = async (req, res) => {
   try {
     const { name, email, password } = req.body;
-
-    // 1. Buscar el rol 'user' base
     const userRole = await Role.findOne({ name: "user" });
-    if (!userRole) {
-      return res.status(500).json({
-        success: false,
-        message: "Error del sistema: rol 'user' no trobat",
-      });
-    }
+    
+    if (!userRole) return res.status(500).json({ success: false, message: "Rol 'user' no trobat" });
 
-    // 2. Comprovar email duplicat
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Aquest email ja està registrat",
-      });
-    }
+    if (existingUser) return res.status(400).json({ success: false, message: "Email ja registrat" });
 
-    // 3. Crear l'usuari
     const newUser = new User({
       name,
       email,
       password,
-      role: "user",
-      roles: [userRole._id],
+      roles: [userRole._id], // Usamos solo el array de roles si es posible
       isActive: true,
     });
     await newUser.save();
 
-    // 4. Populate per obtenir permisos efectius
     const populatedUser = await User.findById(newUser._id).populate({
       path: "roles",
       populate: { path: "permissions" },
     });
 
-    // 5. Generar tokens i respondre
-    const tokenData = _buildTokenResponse(populatedUser);
+    const tokenData = await _buildTokenResponse(populatedUser);
 
-    // 6. Registrar a auditoria
-    await AuditLog.log(
-      populatedUser._id,
-      "auth:register",
-      populatedUser._id.toString(),
-      "user",
-      "success",
-      { email },
-      req
-    );
+    await AuditLog.log(populatedUser._id, "REGISTER", "Nou usuari registrat");
 
-    return res.status(201).json({
-      success: true,
-      message: "Usuari registrat correctament",
-      data: tokenData,
-    });
+    return res.status(201).json({ success: true, ...tokenData });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al registrar usuari",
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── LOGIN ────────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/auth/login
- * Autentica un usuari i retorna access + refresh tokens.
- */
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // 1. Buscar usuari (incloure password que per defecte és select: false)
-    const user = await User.findOne({ email }).select("+password");
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Credencials incorrectes",
-      });
-    }
-
-    // 2. Verificar contrasenya
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      // Registrar intent fallit per seguretat
-      await AuditLog.log(
-        user._id,
-        "auth:login_failed",
-        user._id.toString(),
-        "user",
-        "error",
-        { email },
-        req,
-        "Contrasenya incorrecta"
-      );
-      return res.status(401).json({
-        success: false,
-        message: "Credencials incorrectes",
-      });
-    }
-
-    // 3. Comprovar que l'usuari està actiu
-    if (user.isActive === false) {
-      return res.status(401).json({
-        success: false,
-        message: "Compte desactivat. Contacta amb l'administrador",
-      });
-    }
-
-    // 4. Populate rols i permisos
-    const populatedUser = await User.findById(user._id).populate({
+    const user = await User.findOne({ email }).populate({
       path: "roles",
       populate: { path: "permissions" },
     });
 
-    // 5. Actualitzar lastLogin
-    await User.findByIdAndUpdate(user._id, { lastLogin: new Date() });
+    if (!user || !(await user.comparePassword(password))) {
+      return res.status(401).json({ success: false, message: "Credencials incorrectes" });
+    }
 
-    // 6. Generar tokens i respondre
-    const tokenData = _buildTokenResponse(populatedUser);
+    const tokenData = await _buildTokenResponse(user);
+    await AuditLog.log(user._id, "LOGIN", "Sessió iniciada");
 
-    // 7. Auditoria
-    await AuditLog.log(
-      populatedUser._id,
-      "auth:login",
-      populatedUser._id.toString(),
-      "user",
-      "success",
-      null,
-      req
-    );
-
-    return res.json({
-      success: true,
-      message: "Sessió iniciada correctament",
-      data: tokenData,
-    });
+    res.json({ success: true, ...tokenData });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al iniciar sessió",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// ─── REFRESH TOKEN ────────────────────────────────────────────────────────────
-
-/**
- * POST /api/auth/refresh
- * Renova l'access token usant un refresh token vàlid.
- *
- * Body: { "refreshToken": "xxxxx.yyyyy.zzzzz" }
- * Resposta: { "accessToken": "...", "expiresIn": 900 }
- */
 export const refresh = async (req, res) => {
   try {
     const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(401).json({ success: false, message: "Refresh token requerit" });
 
-    if (!refreshToken) {
-      return res.status(400).json({
-        success: false,
-        message: "El refresh token és obligatori",
-        code: "REFRESH_TOKEN_REQUIRED",
-      });
-    }
-
-    // 1. Verificar signatura i expiració del refresh token
-    let decoded;
-    try {
-      decoded = jwtService.verifyRefreshToken(refreshToken);
-    } catch (jwtError) {
-      if (jwtError.name === "TokenExpiredError") {
-        return res.status(401).json({
-          success: false,
-          message: "Sessió expirada. Si us plau, inicia sessió de nou",
-          code: "REFRESH_TOKEN_EXPIRED",
-        });
-      }
-      return res.status(401).json({
-        success: false,
-        message: "Refresh token invàlid",
-        code: "REFRESH_TOKEN_INVALID",
-      });
-    }
-
-    // 2. Comprovar que el token sigui de tipus refresh
-    if (decoded.tokenType !== "refresh") {
-      return res.status(401).json({
-        success: false,
-        message: "Tipus de token incorrecte",
-        code: "REFRESH_TOKEN_INVALID",
-      });
-    }
-
-    // 3. Comprovar blacklist (per si s'ha fet logout)
-    const isRevoked = await TokenBlacklist.isBlacklisted(refreshToken);
-    if (isRevoked) {
-      return res.status(401).json({
-        success: false,
-        message: "Sessió tancada. Si us plau, inicia sessió de nou",
-        code: "REFRESH_TOKEN_REVOKED",
-      });
-    }
-
-    // 4. Buscar l'usuari i popular rols
+    const decoded = jwtService.verifyRefreshToken(refreshToken);
     const user = await User.findById(decoded.userId).populate({
       path: "roles",
-      populate: { path: "permissions" },
+      populate: { path: "permissions" }
     });
 
-    if (!user || user.isActive === false) {
-      return res.status(401).json({
-        success: false,
-        message: "Usuari no trobat o inactiu",
-        code: "USER_NOT_FOUND",
-      });
-    }
+    if (!user || !user.isActive) return res.status(401).json({ success: false, message: "Usuari no vàlid" });
 
-    // 5. Generar NOU access token (el refresh token es manté)
-    const newAccessToken = jwtService.generateAccessToken(user);
-
-    return res.json({
-      success: true,
-      message: "Access token renovat correctament",
-      data: {
-        accessToken: newAccessToken,
-        expiresIn: 900,
-      },
-    });
+    const tokenData = await _buildTokenResponse(user);
+    res.json({ success: true, ...tokenData });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al renovar el token",
-      error: error.message,
-    });
+    res.status(401).json({ success: false, message: "Sessió caducada" });
   }
 };
 
-// ─── LOGOUT ───────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/auth/logout
- * Revoca els tokens afegint-los a la blacklist.
- *
- * Headers: Authorization: Bearer <accessToken>
- * Body:    { "refreshToken": "xxxxx.yyyyy.zzzzz" }
- */
 export const logout = async (req, res) => {
   try {
-    const accessToken = req.token;              // Posat per auth middleware
+    const accessToken = req.token; 
     const { refreshToken } = req.body;
 
-    // 1. Revocar el access token
-    if (accessToken) {
-      const accessExpiry = jwtService.getTokenExpiration(accessToken);
-      await TokenBlacklist.revokeToken(
-        accessToken,
-        req.user._id,
-        "access",
-        accessExpiry || new Date(Date.now() + 15 * 60 * 1000)
-      );
-    }
+    if (accessToken) await TokenBlacklist.addToBlacklist(accessToken);
+    if (refreshToken) await TokenBlacklist.addToBlacklist(refreshToken);
 
-    // 2. Revocar el refresh token (si s'ha proporcionat)
-    if (refreshToken) {
-      const refreshExpiry = jwtService.getTokenExpiration(refreshToken);
-      await TokenBlacklist.revokeToken(
-        refreshToken,
-        req.user._id,
-        "refresh",
-        refreshExpiry || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      );
-    }
+    // Si el middleware 'auth' funciona, req.user.id existeix
+    if (req.user) await AuditLog.log(req.user.id, "LOGOUT", "Sessió tancada");
 
-    // 3. Auditoria
-    await AuditLog.log(
-      req.user._id,
-      "auth:logout",
-      req.user._id.toString(),
-      "user",
-      "success",
-      null,
-      req
-    );
-
-    return res.json({
-      success: true,
-      message: "Sessió tancada correctament",
-    });
+    return res.json({ success: true, message: "Sessió tancada correctament" });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error al tancar sessió",
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: "Error al fer logout" });
   }
 };
 

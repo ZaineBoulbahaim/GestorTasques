@@ -1,130 +1,143 @@
-// server.js
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import dotenv from "dotenv";
 import path from "path";
 
-// Importar configuración de base de datos
+// Base de dades
 import connectDB from "./src/config/db.js";
 
-// IMPORTAR RUTAS
+// Rutes
+import authRoutes from "./src/routes/authRoutes.js";
 import taskRoutes from "./src/routes/taskRoutes.js";
 import uploadRoutes from "./src/routes/uploadRoutes.js";
-import authRoutes from "./src/routes/authRoutes.js";
 import adminRoutes from "./src/routes/adminRoutes.js";
 
-// IMPORTAR MIDDLEWARE DE ERRORES
+// Middlewares
 import { errorHandler } from "./src/utils/errorResponse.js";
-
-// ← NOU: IMPORTAR MIDDLEWARE D'AUDITORIA
 import auditMiddleware from "./src/middleware/auditMiddleware.js";
+import { dynamicRateLimiter, authRateLimiter } from "./src/middleware/rateLimiter.js";
 
-// ← NOU: IMPORTAR SEEDS
+// Seeds
 import seedPermissions from "./src/utils/seedPermissions.js";
 import seedRoles from "./src/utils/seedRoles.js";
 
-// Cargar variables de entorno
+// Servei de delegació (per al cron job)
+import delegationService from "./src/services/delegationService.js";
+
+// ─── CONFIGURACIÓ ────────────────────────────────────────────────────────────
 dotenv.config();
 
-// Conectar a MongoDB
-connectDB();
-
-// ← NOU: EJECUTAR SEEDS después de conectar a MongoDB
-// Los seeds crean automáticamente los permisos y roles del sistema
-// si no existen todavía
+// ─── BASE DE DADES + SEEDS ────────────────────────────────────────────────────
 connectDB().then(async () => {
-  // Primero crear permisos (los roles dependen de los permisos)
-  await seedPermissions();
-  // Luego crear roles con los permisos asignados
-  await seedRoles();
+  await seedPermissions();   // Primer permisos (els rols en depenen)
+  await seedRoles();         // Després rols amb jerarquia
 });
 
-// Crear aplicación Express
+// ─── APP ──────────────────────────────────────────────────────────────────────
 const app = express();
 
-/** MIDDLEWARES GLOBALES */
+// ── Seguretat HTTP (T9 Fase 8) ────────────────────────────────────────────────
+// Helmet afegeix headers de seguretat: CSP, HSTS, X-Frame-Options, etc.
+app.use(helmet());
 
-// CORS - Permitir peticiones desde otros orígenes
-app.use(cors());
+// ── CORS ──────────────────────────────────────────────────────────────────────
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
-// Parser de JSON - Permite leer req.body
-app.use(express.json());
+// ── Parser JSON ───────────────────────────────────────────────────────────────
+app.use(express.json({ limit: "10mb" }));
 
-// Servir archivos estáticos (imágenes subidas localmente)
+// ── Fitxers estàtics ──────────────────────────────────────────────────────────
 app.use("/uploads", express.static(path.join(path.resolve(), "uploads")));
 
-// ← NOU: MIDDLEWARE D'AUDITORIA GLOBAL
-// IMPORTANTE: Debe ir ANTES de las rutas para interceptar las respuestas
-// Este middleware registra automáticamente todas las acciones importantes
+// ── Auditoria global ──────────────────────────────────────────────────────────
+// Ha d'anar ABANS de les rutes per interceptar les respostes
 app.use(auditMiddleware);
 
-/** RUTAS DE LA API
-  ORDEN IMPORTANTE:
- 1. Middleware globales (CORS, JSON, Auditoria)
- 2. Rutas públicas (auth)
- 3. Rutas protegidas (tasks, upload, admin)
- 4. Middleware de errores (al final)
-*/
+// ─── HEALTH CHECK ────────────────────────────────────────────────────────────
+app.get("/health", (req, res) => {
+  res.json({ success: true, status: "OK", timestamp: new Date().toISOString() });
+});
 
-// Ruta de bienvenida (opcional)
+// ─── RUTA BENVINGUDA ────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({
     success: true,
-    message: "🚀 API del Gestor de Tareas funcionando correctamente",
-    version: "3.0.0",                    // ← MODIFICAT: Nueva versión
+    message: "🚀 Task Manager API - T9 JWT Avançat + Jerarquia de Rols",
+    version: "4.0.0",
     endpoints: {
-      auth: "/api/auth",
-      tasks: "/api/tasks",
-      upload: "/api/upload",
-      admin: "/api/admin",
-      // ← NOU: Documentar nuevos endpoints
+      auth:        "/api/auth",
+      tasks:       "/api/tasks",
+      upload:      "/api/upload",
+      admin:       "/api/admin",
       permissions: "/api/admin/permissions",
-      roles: "/api/admin/roles",
-      auditLogs: "/api/admin/audit-logs",
+      roles:       "/api/admin/roles",
+      delegations: "/api/admin/delegations",
+      auditLogs:   "/api/admin/audit-logs",
     },
   });
 });
 
-// RUTAS DE AUTENTICACIÓN (públicas)
+// ─── RUTES ───────────────────────────────────────────────────────────────────
+//
+// ORDRE IMPORTANT:
+//   1. Rate limiter d'auth ABANS de les rutes d'autenticació
+//   2. Rate limiter dinàmic (per rol) DESPRÉS de les rutes d'auth
+//      perquè les rutes d'auth no tenen req.user encara
+//   3. Rutes públiques (auth)
+//   4. Rate limiter dinàmic per a la resta de rutes protegides
+//   5. Rutes protegides
+//   6. 404 handler
+//   7. Error handler
+
+// Auth (rutes públiques — sense dynamicRateLimiter aquí, l'apliquem per ruta específica)
 app.use("/api/auth", authRoutes);
 
-// Rutas de subida de imágenes (protegidas con auth)
-app.use("/api/upload", uploadRoutes);
+// Rate limiting dinàmic per rol per a totes les rutes protegides
+// S'aplica DESPRÉS de /api/auth perquè les rutes de login no tenen req.user
+app.use("/api/tasks", dynamicRateLimiter, taskRoutes);
+app.use("/api/upload", dynamicRateLimiter, uploadRoutes);
+app.use("/api/admin", dynamicRateLimiter, adminRoutes);
 
-// RUTAS DE TAREAS (protegidas con auth + checkPermission)
-app.use("/api/tasks", taskRoutes);
-
-// RUTAS DE ADMINISTRACIÓN (protegidas con auth + checkPermission)
-app.use("/api/admin", adminRoutes);
-
-/**
-MANEJO DE RUTAS NO ENCONTRADAS (404)
-Este middleware captura cualquier ruta que no coincida
-con las rutas definidas arriba */
+// ─── 404 ─────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Ruta ${req.originalUrl} no encontrada`,
+    message: `Ruta ${req.originalUrl} no trobada`,
   });
 });
 
-/**
-MIDDLEWARE DE MANEJO DE ERRORES
-IMPORTANTE: Debe ir AL FINAL, después de todas las rutas
-Captura todos los errores que ocurran en la aplicación */
+// ─── ERROR HANDLER ────────────────────────────────────────────────────────────
 app.use(errorHandler);
 
-/** INICIAR SERVIDOR */
+// ─── CRON JOB: Expirar delegacions ───────────────────────────────────────────
+// Comprova cada hora si hi ha delegacions que han expirat
+// i les marca com 'expired' automàticament
+setInterval(async () => {
+  try {
+    await delegationService.expireOldDelegations();
+  } catch (error) {
+    console.error("❌ Error en cron job de delegacions:", error.message);
+  }
+}, 60 * 60 * 1000); // cada hora
+
+// ─── SERVIDOR ────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
-  console.log(`📚 Documentación de rutas:`);
-  console.log(`   - Auth: http://localhost:${PORT}/api/auth`);
-  console.log(`   - Tasks: http://localhost:${PORT}/api/tasks`);
-  console.log(`   - Upload: http://localhost:${PORT}/api/upload`);
-  console.log(`   - Admin: http://localhost:${PORT}/api/admin`);
-  console.log(`   - Permissions: http://localhost:${PORT}/api/admin/permissions`);  // ← NOU
-  console.log(`   - Roles: http://localhost:${PORT}/api/admin/roles`);              // ← NOU
-  console.log(`   - Audit Logs: http://localhost:${PORT}/api/admin/audit-logs`);    // ← NOU
+  console.log(`\n✅ Servidor T9 corrent a http://localhost:${PORT}`);
+  console.log(`📚 Endpoints principals:`);
+  console.log(`   🔐 Auth:        http://localhost:${PORT}/api/auth`);
+  console.log(`   📋 Tasks:       http://localhost:${PORT}/api/tasks`);
+  console.log(`   👥 Admin:       http://localhost:${PORT}/api/admin`);
+  console.log(`   🎭 Rols:        http://localhost:${PORT}/api/admin/roles`);
+  console.log(`   🔑 Permisos:    http://localhost:${PORT}/api/admin/permissions`);
+  console.log(`   🤝 Delegacions: http://localhost:${PORT}/api/admin/delegations`);
+  console.log(`   📊 Auditoria:   http://localhost:${PORT}/api/admin/audit-logs\n`);
 });

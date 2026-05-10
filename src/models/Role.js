@@ -7,7 +7,6 @@ import mongoose from "mongoose";
  */
 const roleSchema = new mongoose.Schema(
   {
-    // Nom del rol (únic). Ex: "admin", "editor", "viewer"
     name: {
       type: String,
       required: [true, "El nom del rol és obligatori"],
@@ -15,78 +14,46 @@ const roleSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
-
-    // Descripció de les capacitats del rol
+    // --- NUEVOS CAMPOS T9 ---
+    level: {
+      type: Number,
+      default: 1, // 1: VIEWER, 5: SUPER_ADMIN
+      required: true
+    },
+    parentRole: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Role",
+      default: null
+    },
+    // ------------------------
     description: {
       type: String,
       trim: true,
       default: "",
     },
-
-    // Relació Many-to-Many amb el model Permission
-    // Guardem un array d'ObjectIds que apunten a la col·lecció 'permissions'
     permissions: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Permission",
       },
     ],
-
-    // Protecció contra l'esborrat de rols base (admin/user)
     isSystemRole: {
       type: Boolean,
       default: false,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// ÍNDEXS PER A OPTIMITZACIÓ
-roleSchema.index({ name: 1 }, { unique: true });
+// ... (tus índices y métodos actuales están bien)
 
-// MÈTODES D'INSTÀNCIA (Sobre un rol concret)
-
-/**
- * Afegeix un permís al rol si no el té ja.
- */
-roleSchema.methods.addPermission = function (permissionId) {
-  if (!this.permissions.includes(permissionId)) {
-    this.permissions.push(permissionId);
+// VALIDACIÓN DE JERARQUÍA: Evitar que un rol sea su propio padre (ciclo infinito)
+roleSchema.pre('save', function(next) {
+  if (this.parentRole && this.parentRole.equals(this._id)) {
+    return next(new Error("Un rol no pot ser el seu propi pare (evitar bucles infinits)"));
   }
-  return this.save();
-};
-
-/**
- * Elimina un permís del rol.
- */
-roleSchema.methods.removePermission = function (permissionId) {
-  this.permissions = this.permissions.filter(
-    (id) => id.toString() !== permissionId.toString()
-  );
-  return this.save();
-};
-
-/**
- * Verifica si el rol té un permís concret per nom.
- * Requereix que el camp 'permissions' estigui populated.
- */
-roleSchema.methods.hasPermission = function (permissionName) {
-  return this.permissions.some(
-    (permission) => permission.name && permission.name === permissionName
-  );
-};
-
-// MÈTODES ESTÀTICS (Sobre el model global)
-
-/**
- * Busca un rol pel seu nom i carrega automàticament els seus permisos.
- */
-roleSchema.statics.findByName = function (name) {
-  return this.findOne({ name: name.toLowerCase() }).populate("permissions");
-};
+  next();
+});
 
 const Role = mongoose.model("Role", roleSchema);
-
 export default Role;
