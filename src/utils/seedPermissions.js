@@ -12,6 +12,8 @@ const systemPermissions = [
   { name: "tasks:read", description: "Veure tasques", category: "tasks", isSystemPermission: true },
   { name: "tasks:update", description: "Editar tasques", category: "tasks", isSystemPermission: true },
   { name: "tasks:delete", description: "Eliminar tasques", category: "tasks", isSystemPermission: true },
+  { name: "system:configure", description: "Configurar el sistema", category: "audit", isSystemPermission: true },
+  { name: "system:backup", description: "Fer còpia de seguretat", category: "audit", isSystemPermission: true },
 
   // Mòdul d'Usuaris
   { name: "users:manage", description: "Gestionar usuaris", category: "users", isSystemPermission: true },

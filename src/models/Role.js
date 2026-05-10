@@ -1,31 +1,24 @@
 import mongoose from "mongoose";
 
-/**
- * MODEL DE ROL (Role)
- * Un rol és un contenidor o agrupació de permisos. 
- * Permet assignar un conjunt de capacitats a un usuari de cop.
- */
 const roleSchema = new mongoose.Schema(
   {
     name: {
       type: String,
       required: [true, "El nom del rol és obligatori"],
-      unique: true,
+      unique: true, // Esto ya crea un índice, no hace falta poner index: true ni definirlo abajo
       trim: true,
       lowercase: true,
     },
-    // --- NUEVOS CAMPOS T9 ---
     level: {
       type: Number,
-      default: 1, // 1: VIEWER, 5: SUPER_ADMIN
-      required: true
+      default: 1,
+      required: true,
     },
     parentRole: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Role",
-      default: null
+      default: null,
     },
-    // ------------------------
     description: {
       type: String,
       trim: true,
@@ -45,15 +38,32 @@ const roleSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ... (tus índices y métodos actuales están bien)
+// ÍNDEXS (Solo los que no son únicos por defecto)
+roleSchema.index({ level: 1 });
+roleSchema.index({ parentRole: 1 });
 
-// VALIDACIÓN DE JERARQUÍA: Evitar que un rol sea su propio padre (ciclo infinito)
-roleSchema.pre('save', function(next) {
-  if (this.parentRole && this.parentRole.equals(this._id)) {
-    return next(new Error("Un rol no pot ser el seu propi pare (evitar bucles infinits)"));
+// VALIDACIÓ PRE-SAVE
+// Si usas async/await en el pre-save, NO uses 'next'. Mongoose detecta la promesa.
+roleSchema.pre("save", async function () {
+  if (this.parentRole && this._id && this.parentRole.equals(this._id)) {
+    throw new Error("Un rol no pot ser el seu propi pare");
   }
-  next();
 });
+
+// MÈTODES D'INSTÀNCIA
+roleSchema.methods.addPermission = function (permissionId) {
+  if (!this.permissions.includes(permissionId)) {
+    this.permissions.push(permissionId);
+  }
+  return this.save();
+};
+
+roleSchema.methods.removePermission = function (permissionId) {
+  this.permissions = this.permissions.filter(
+    (id) => id.toString() !== permissionId.toString()
+  );
+  return this.save();
+};
 
 const Role = mongoose.model("Role", roleSchema);
 export default Role;
